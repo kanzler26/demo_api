@@ -1,0 +1,6 @@
+@AlphaLising_HostAddress = http://localhost:8080
+
+#GET {{AlphaLising_HostAddress}}/api/Products/
+Accept: application/json
+
+###

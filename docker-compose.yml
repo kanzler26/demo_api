@@ -1,0 +1,34 @@
+ services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=MyDemoPass123!
+    ports:
+      - "1433:1433"
+  
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: "redis-server --appendonly yes"
+
+webapi:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=db;Database=AlphaLisingDb;User=sa;Password=MyDemoPass123!;TrustServerCertificate=true;
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  mssql_data:
+  redis_data:
