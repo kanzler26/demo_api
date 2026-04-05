@@ -36,6 +36,16 @@ services:
     build: .
     ports:
       - "8080:8080"
+    develop:
+      watch:
+        # При изменении .cs файлов — пересобираем и перезапускаем
+        - path: ./src
+          action: rebuild
+          target: /src
+        # При изменении appsettings — копируем без пересборки
+        - path: ./appsettings*.json
+          action: sync+restart
+          target: /app
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=db;Database=AlphaLisingDb;User=sa;Password=MyDemoPass123!;TrustServerCertificate=true;
