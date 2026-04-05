@@ -29,7 +29,9 @@ builder.Services.AddConnections();
 builder.Services.AddSwaggerGen(options =>
     options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "AlphaLising API", Version = "v1", Description = "Api for AlphaLising for testing"
+        Title = "AlphaLising API",
+        Version = "v1",
+        Description = "Api for AlphaLising for testing"
     })
 );
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -53,24 +55,20 @@ builder.Services.AddScoped<IProductService<CreateProductRequest, ResponseProduct
 builder.Services.AddMapster();
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddHostedService<Infrastructure.Seeding.DatabaseSeeder>();
+}
+
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage(); // 
-    using var scope = app.Services.CreateScope();
-    var context = scope.ServiceProvider.GetRequiredService<MyAppContext>();
-    context.Database.Migrate(); // применяет миграции
-}
-else
-{
-    app.UseExceptionHandler("/error");
-    app.UseHsts();
-}
+
+
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    app.UseDeveloperExceptionPage();
     app.MapOpenApi();
     app.UseSwagger();
     app.UseSwaggerUI(c =>
@@ -83,6 +81,11 @@ if (app.Environment.IsDevelopment())
         .AllowAnyMethod()
         .AllowAnyHeader());
 }
+else
+{
+    app.UseExceptionHandler("/error");
+    app.UseHsts();
+}
 
 //переделать все dto на record
 //реализовать самописный перехватчик для ошибок
@@ -90,7 +93,7 @@ if (app.Environment.IsDevelopment())
 //проверить слои на протечки
 // добавить api gateway
 //добавить RateLimiting
- app.UseCustomExceptionHandler();
+app.UseCustomExceptionHandler();
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
