@@ -17,7 +17,7 @@ jobs:
   # === 1. LINT & BUILD (быстро, ловим ошибки рано) ===
   lint-and-build:
     name: Lint & Build
-    runs-on: ubuntu-25.10
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +39,7 @@ jobs:
   # === 2. TEST (самое важное!) ===
   test:
     name: Run Tests
-    runs-on: ubuntu-25.10
+    runs-on: ubuntu-24.04
     needs: lint-and-build
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
   # === 3. BUILD & PUSH DOCKER IMAGE (только для master/develop) ===
   docker:
     name: Build & Push Docker Image
-    runs-on: ubuntu-25.10
+    runs-on: ubuntu-24.04
     needs: test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
     permissions:
