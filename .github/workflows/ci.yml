@@ -3,7 +3,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [ master, dev ]
   pull_request:
     branches: [ master ]
 
@@ -62,12 +62,12 @@ jobs:
           files: '**/coverage.cobertura.xml'
           fail_ci_if_error: false
 
-  # === 3. BUILD & PUSH DOCKER IMAGE (только для master/develop) ===
+  # === 3. BUILD & PUSH DOCKER IMAGE (только для master/dev) ===
   docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-24.04
     needs: test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
       packages: write  # ← Важно для push в GHCR
