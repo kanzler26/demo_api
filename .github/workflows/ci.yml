@@ -1,0 +1,104 @@
+# .github/workflows/ci.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_PATH: AlphaLising/AlphaLising.csproj
+
+jobs:
+  # === 1. LINT & BUILD (быстро, ловим ошибки рано) ===
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-25.10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with: { dotnet-version: ${{ env.DOTNET_VERSION }} }
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build
+        run: dotnet build ${{ env.PROJECT_PATH }} --no-restore --configuration Release
+
+      - name: Run analyzers (optional but recommended)
+        run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings (non-blocking)"
+
+  # === 2. TEST (самое важное!) ===
+  test:
+    name: Run Tests
+    runs-on: ubuntu-25.10
+    needs: lint-and-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with: { dotnet-version: ${{ env.DOTNET_VERSION }} }
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Run unit tests
+        run: dotnet test ${{ env.PROJECT_PATH }} --no-restore --configuration Release --collect:"XPlat Code Coverage" --logger:"console;verbosity=detailed"
+
+      - name: Upload coverage to Codecov (optional)
+        uses: codecov/codecov-action@v4
+        if: github.event_name == 'push'
+        with:
+          files: '**/coverage.cobertura.xml'
+          fail_ci_if_error: false
+
+  # === 3. BUILD & PUSH DOCKER IMAGE (только для master/develop) ===
+  docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-25.10
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    permissions:
+      contents: read
+      packages: write  # ← Важно для push в GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
