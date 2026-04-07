@@ -14,6 +14,7 @@ using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 MappingConfig.RegisterMappings();
@@ -60,42 +61,82 @@ if (builder.Environment.IsDevelopment())
     builder.Services.AddHostedService<Infrastructure.Seeding.DatabaseSeeder>();
 }
 
-var app = builder.Build();
-
-
-
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+Log.Logger = new LoggerConfiguration()
+.MinimumLevel.Debug()
+.MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
+.Enrich.FromLogContext()
+.WriteTo.Console(
+    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+try
 {
-    app.UseDeveloperExceptionPage();
-    app.MapOpenApi();
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
+    Log.Information("🚀 Starting demo_api...");
+    // Подключаем Serilog к ASP.NET Core
+    builder.Host.UseSerilog();
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
-        c.RoutePrefix = "swagger"; // по умолчанию доступен по /swagger
+        app.UseDeveloperExceptionPage();
+        app.MapOpenApi();
+        app.UseSwagger();
+        app.UseSwaggerUI(c =>
+        {
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
+            c.RoutePrefix = "swagger"; // по умолчанию доступен по /swagger
+        });
+        app.UseCors(policy => policy
+            .AllowAnyOrigin()
+            .AllowAnyMethod()
+            .AllowAnyHeader());
+    }
+    else
+    {
+        app.UseExceptionHandler("/error");
+        app.UseHsts();
+    }
+
+    //переделать все dto на record
+    //реализовать самописный перехватчик для ошибок
+    //использовать подключенный Polly
+    //проверить слои на протечки
+    // добавить api gateway
+    //добавить RateLimiting
+    app.UseCustomExceptionHandler();
+    app.UseHttpsRedirection();
+    app.UseAuthorization();
+    app.MapControllers();
+    app.Use(async (context, next) =>
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        logger.LogInformation("📥 Request: {Method} {Path} from {IP}",
+            context.Request.Method,
+            context.Request.Path,
+            context.Connection.RemoteIpAddress);
+
+        await next();
+
+        stopwatch.Stop();
+        logger.LogInformation("📤 Response: {StatusCode} in {ElapsedMs}ms",
+            context.Response.StatusCode,
+            stopwatch.ElapsedMilliseconds);
     });
-    app.UseCors(policy => policy
-        .AllowAnyOrigin()
-        .AllowAnyMethod()
-        .AllowAnyHeader());
+
+    // ... остальной пайплайн (UseAuthorization, MapControllers)
+
+    Log.Information("✅ Application started, listening on {Urls}",
+        Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "default");
+    app.Run();
 }
-else
+catch (Exception ex)
 {
-    app.UseExceptionHandler("/error");
-    app.UseHsts();
+    Log.Fatal(ex, "❌ Application terminated unexpectedly");
 }
-
-//переделать все dto на record
-//реализовать самописный перехватчик для ошибок
-//использовать подключенный Polly
-//проверить слои на протечки
-// добавить api gateway
-//добавить RateLimiting
-app.UseCustomExceptionHandler();
-app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
-
-app.Run();
+finally
+{
+    Log.CloseAndFlush();
+}
