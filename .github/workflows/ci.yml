@@ -3,18 +3,18 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [master, dev]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DOTNET_VERSION: '9.0.x'
+  DOTNET_VERSION: "9.0.x"
   PROJECT_PATH: AlphaLising/AlphaLising.csproj
 
 jobs:
-  # === 1. LINT & BUILD (быстро, ловим ошибки рано) ===
+  # === 1. LINT & BUILD ===
   lint-and-build:
     name: Lint & Build
     runs-on: ubuntu-24.04
@@ -23,9 +23,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
-        with: 
-           dotnet-version: ${{ env.DOTNET_VERSION }} 
-        
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
@@ -33,10 +32,10 @@ jobs:
       - name: Build
         run: dotnet build ${{ env.PROJECT_PATH }} --no-restore --configuration Release
 
-      - name: Run analyzers (optional but recommended)
-        run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings (non-blocking)"
+      - name: Run analyzers
+        run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings"
 
-  # === 2. TEST (самое важное!) ===
+  # === 2. TEST ===
   test:
     name: Run Tests
     runs-on: ubuntu-24.04
@@ -46,8 +45,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
-        with: 
-          dotnet-version: ${{ env.DOTNET_VERSION }} 
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
@@ -55,22 +54,22 @@ jobs:
       - name: Run unit tests
         run: dotnet test ${{ env.PROJECT_PATH }} --no-restore --configuration Release --collect:"XPlat Code Coverage" --logger:"console;verbosity=detailed"
 
-      - name: Upload coverage to Codecov (optional)
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         if: github.event_name == 'push'
         with:
-          files: '**/coverage.cobertura.xml'
+          files: "**/coverage.cobertura.xml"
           fail_ci_if_error: false
 
-  # === 3. BUILD & PUSH DOCKER IMAGE (только для master/develop) ===
+  # === 3. BUILD & PUSH DOCKER IMAGE ===
   docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-24.04
     needs: test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
-      packages: write  # ← Важно для push в GHCR
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -105,3 +104,40 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # === 4. DEPLOY TO VPS ===
+  deploy-to-vps:
+    name: Deploy to Beget VPS
+    runs-on: ubuntu-24.04
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            # Логин в GHCR
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin 2>/dev/null || true
+
+            # Pull образа из GHCR (используем тот же IMAGE_NAME, что и в сборке)
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master
+
+            # Останавливаем старый контейнер
+            docker stop demo_api 2>/dev/null || true
+            docker rm demo_api 2>/dev/null || true
+
+            # Запускаем новый
+            docker run -d \
+              --name demo_api \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              -e ASPNETCORE_ENVIRONMENT=Production \
+              -e ASPNETCORE_URLS=http://+:8080 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master
+
+            # Чистим старые образы
+            docker image prune -f
