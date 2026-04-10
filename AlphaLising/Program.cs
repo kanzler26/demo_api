@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AlphaLising.Extensions;
 using Application.Mappings;
 using Application.Service;
@@ -5,18 +6,46 @@ using Core.DTO;
 using Core.Interfaces;
 using Core.Models;
 using Infrastructure.Auth;
-using Infrastructure.Context;
 using Infrastructure.Redis;
 using Infrastructure.Repositories;
+using Infrastructure.Seeding;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Retry;
+using Serilog;
+using Serilog.Events;
 using StackExchange.Redis;
 using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
-using Serilog;
-
+ 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddHttpClient("siem", client => {
+    client.BaseAddress = new Uri("https://siem.com");
+    client.Timeout = Timeout.InfiniteTimeSpan;
+    } ) 
+;
+builder.Services.AddResiliencePipeline("siem-pipeline", p =>
+{
+    p.AddTimeout(TimeSpan.FromSeconds(3)) // 1. Внутренний (применяется к каждой попытке)
+        .AddRetry(new RetryStrategyOptions  // 2. Средний (перехватывает таймауты и 5xx)
+        {
+            BackoffType = DelayBackoffType.Exponential,
+            MaxRetryAttempts = 3,
+            UseJitter = true,
+            Delay = TimeSpan.FromSeconds(1)
+        })
+        .AddCircuitBreaker( // 3. Внешний (считает ошибки, быстро фейлит)
+            new CircuitBreakerStrategyOptions
+            {
+                FailureRatio = 0.5,
+                SamplingDuration = TimeSpan.FromSeconds(10),
+                BreakDuration = TimeSpan.FromSeconds(30)
+            }
+        );
+});
 MappingConfig.RegisterMappings();
 
 builder.Services.AddOpenApi();
@@ -56,17 +85,14 @@ builder.Services.AddScoped<IProductService<CreateProductRequest, ResponseProduct
 builder.Services.AddMapster();
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddHostedService<Infrastructure.Seeding.DatabaseSeeder>();
-}
+if (builder.Environment.IsDevelopment()) builder.Services.AddHostedService<DatabaseSeeder>();
 
 Log.Logger = new LoggerConfiguration()
-.MinimumLevel.Debug()
-.MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
-.Enrich.FromLogContext()
-.WriteTo.Console(
-    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .MinimumLevel.Debug()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+    .Enrich.FromLogContext()
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 try
 {
@@ -111,7 +137,7 @@ try
     app.Use(async (context, next) =>
     {
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
 
         logger.LogInformation("📥 Request: {Method} {Path} from {IP}",
             context.Request.Method,
