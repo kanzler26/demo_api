@@ -1,22 +1,68 @@
+using System.Diagnostics;
 using AlphaLising.Extensions;
 using Application.Mappings;
 using Application.Service;
+using AspNetCoreRateLimit;
 using Core.DTO;
 using Core.Interfaces;
 using Core.Models;
 using Infrastructure.Auth;
-using Infrastructure.Context;
 using Infrastructure.Redis;
 using Infrastructure.Repositories;
+using Infrastructure.Seeding;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Retry;
+using Serilog;
+using Serilog.Events;
 using StackExchange.Redis;
 using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
-using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddOptions();
+builder.Services.AddMemoryCache();
+builder.Services.Configure<IpRateLimitOptions>(options =>
+{
+    options.EnableEndpointRateLimiting = true;
+    options.StackBlockedRequests = false;
+    options.GeneralRules =
+    [
+        new() { Endpoint = "*", Period = "1s", Limit = 5 } // макс 5 запросов в секунду с одного IP
+    ];
+});
+builder.Services.AddInMemoryRateLimiting();
+builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+
+builder.Services.AddHttpClient("siem", client =>
+{
+    client.BaseAddress = new Uri("https://siem.com");
+    client.Timeout = Timeout.InfiniteTimeSpan; // Делегируем таймаут политике Polly
+})
+.AddResilienceHandler("siem-pipeline", builder => // ← builder — это ResiliencePipelineBuilder
+ {
+     builder.AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+     {
+         MaxRetryAttempts = 3,
+         Delay = TimeSpan.FromSeconds(2),
+         BackoffType = DelayBackoffType.Exponential,
+         // Defines which results/exceptions to retry
+         ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+             .Handle<HttpRequestException>()
+             .HandleResult(r => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+     })
+     .AddCircuitBreaker(new CircuitBreakerStrategyOptions<HttpResponseMessage>
+     {
+         FailureRatio = 0.5,
+         SamplingDuration = TimeSpan.FromSeconds(10),
+         BreakDuration = TimeSpan.FromSeconds(30)
+     });
+ });
+
 MappingConfig.RegisterMappings();
 
 builder.Services.AddOpenApi();
@@ -56,17 +102,14 @@ builder.Services.AddScoped<IProductService<CreateProductRequest, ResponseProduct
 builder.Services.AddMapster();
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddHostedService<Infrastructure.Seeding.DatabaseSeeder>();
-}
+if (builder.Environment.IsDevelopment()) builder.Services.AddHostedService<DatabaseSeeder>();
 
 Log.Logger = new LoggerConfiguration()
-.MinimumLevel.Debug()
-.MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
-.Enrich.FromLogContext()
-.WriteTo.Console(
-    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .MinimumLevel.Debug()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+    .Enrich.FromLogContext()
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 try
 {
@@ -107,11 +150,15 @@ try
     app.UseCustomExceptionHandler();
     app.UseHttpsRedirection();
     app.UseAuthorization();
+    app.UseRouting();
+    app.UseIpRateLimiting();
+
     app.MapControllers();
+    // В пайплайне, после app.UseRouting():
     app.Use(async (context, next) =>
     {
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
 
         logger.LogInformation("📥 Request: {Method} {Path} from {IP}",
             context.Request.Method,
