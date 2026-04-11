@@ -61,9 +61,9 @@ jobs:
           files: "**/coverage.cobertura.xml"
           fail_ci_if_error: false
 
-  # === 3. BUILD & PUSH DOCKER IMAGE ===
-  docker:
-    name: Build & Push Docker Image
+    # === 3. BUILD & PUSH DOCKER IMAGE + DEPLOY ===
+  docker-and-deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-24.04
     needs: test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
@@ -104,6 +104,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
       - name: Deploy to Beget VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -111,56 +113,27 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin 2>/dev/null || true
-
-            docker pull ${{ secrets.DOCKER_USERNAME }}/demo_api:latest
-
-            docker stop demo_api 2>/dev/null || true
-            docker rm demo_api 2>/dev/null || true
-
-            docker run -d \
-              --name demo_api \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              -e ASPNETCORE_ENVIRONMENT=Production \
-              -e ASPNETCORE_URLS=http://+:8080 \
-              -e ConnectionStrings__Redis=${{ secrets.REDIS_CONNECTION }} \ 
-              ${{ secrets.DOCKER_USERNAME }}/demo_api:latest
-
-            docker image prune -f
-  # === 4. DEPLOY TO VPS ===
-  deploy-to-vps:
-    name: Deploy to Beget VPS
-    runs-on: ubuntu-24.04
-    needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22
-          script: |
-            # Логин в GHCR
+            # Логин в GHCR (для pull приватного образа)
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin 2>/dev/null || true
 
-            # Pull образа из GHCR (используем тот же IMAGE_NAME, что и в сборке)
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master
+            # Pull образа (используем тот же тег, что и в build)
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
 
             # Останавливаем старый контейнер
             docker stop demo_api 2>/dev/null || true
             docker rm demo_api 2>/dev/null || true
 
-            # Запускаем новый
+            # Запускаем НОВЫЙ с правильными настройками
             docker run -d \
               --name demo_api \
               --restart unless-stopped \
+              --network app-network \
               -p 8080:8080 \
               -e ASPNETCORE_ENVIRONMENT=Production \
               -e ASPNETCORE_URLS=http://+:8080 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master
+              -e ConnectionStrings__Redis=redis:6379 \
+              -e ConnectionStrings__DefaultConnection=${{ secrets.SQL_CONNECTION }} \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
 
             # Чистим старые образы
             docker image prune -f
