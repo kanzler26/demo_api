@@ -104,7 +104,30 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Deploy to Beget VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin 2>/dev/null || true
 
+            docker pull ${{ secrets.DOCKER_USERNAME }}/demo_api:latest
+
+            docker stop demo_api 2>/dev/null || true
+            docker rm demo_api 2>/dev/null || true
+
+            docker run -d \
+              --name demo_api \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              -e ASPNETCORE_ENVIRONMENT=Production \
+              -e ASPNETCORE_URLS=http://+:8080 \
+              -e ConnectionStrings__Redis=${{ secrets.REDIS_CONNECTION }} \ 
+              ${{ secrets.DOCKER_USERNAME }}/demo_api:latest
+
+            docker image prune -f
   # === 4. DEPLOY TO VPS ===
   deploy-to-vps:
     name: Deploy to Beget VPS
