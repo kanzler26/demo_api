@@ -15,6 +15,14 @@ public class MyAppContext : DbContext
     // сложная конфигурация моделей вызывается один раз на контекст и кешируется
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
+        // Привести все имена таблиц к нижнему регистру (опционально, для совместимости)
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            entity.SetTableName(entity.GetTableName()?.ToLowerInvariant());
+        }
+
         modelBuilder.Entity<Product>().HasOne(p => p.Category)
             .WithMany(c => c.Products).HasForeignKey(p => p.CategoryId);
         modelBuilder.Entity<Product>()

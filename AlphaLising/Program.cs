@@ -22,6 +22,8 @@ using Serilog.Events;
 using StackExchange.Redis;
 using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
+using Npgsql;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOptions();
@@ -69,9 +71,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddLogging();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddDbContext<AppContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
-        .LogTo(Console.WriteLine, LogLevel.Information));
+builder.Services.AddDbContext<AppContext>(options => options
+    .UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddConnections();
 builder.Services.AddSwaggerGen(options =>
     options.SwaggerDoc("v1", new OpenApiInfo

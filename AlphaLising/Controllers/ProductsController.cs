@@ -6,7 +6,6 @@ using Core.Interfaces;
 using Core.Models;
 using Infrastructure.Context;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using MyAppContext = Infrastructure.Context.MyAppContext;
 
@@ -57,44 +56,44 @@ public class ProductsController(
         ;
     }
 
-    [HttpPost("bulkproducts")]
-    public async Task<IActionResult> CreateBulksAsync(CancellationToken ct, int rows = 50_000)
-    {
-        await using var connection = new SqlConnection(Configuration.GetConnectionString("DefaultConnection"));
-        await connection.OpenAsync(ct); //  
+    // [HttpPost("bulkproducts")]
+    // public async Task<IActionResult> CreateBulksAsync(CancellationToken ct, int rows = 50_000)
+    // {
+    //     await using var connection = new SqlConnection(Configuration.GetConnectionString("DefaultConnection"));
+    //     await connection.OpenAsync(ct); //  
 
-        await using var transaction = connection.BeginTransaction(); // ← Опционально: транзакция
-        using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction);
-        bulkCopy.DestinationTableName = "Products";
+    //     await using var transaction = connection.BeginTransaction(); // ← Опционально: транзакция
+    //     using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction);
+    //     bulkCopy.DestinationTableName = "Products";
 
-        // 🔥 Обязательно: добавить маппинг колонок!
-        bulkCopy.ColumnMappings.Add("Name", "Name");
-        bulkCopy.ColumnMappings.Add("Price", "Price");
-        bulkCopy.ColumnMappings.Add("CategoryId", "CategoryId");
+    //     // 🔥 Обязательно: добавить маппинг колонок!
+    //     bulkCopy.ColumnMappings.Add("Name", "Name");
+    //     bulkCopy.ColumnMappings.Add("Price", "Price");
+    //     bulkCopy.ColumnMappings.Add("CategoryId", "CategoryId");
 
-        var table = new DataTable();
-        table.Columns.Add("Name", typeof(string));
-        table.Columns.Add("Price", typeof(decimal));
-        table.Columns.Add("CategoryId", typeof(int));
+    //     var table = new DataTable();
+    //     table.Columns.Add("Name", typeof(string));
+    //     table.Columns.Add("Price", typeof(decimal));
+    //     table.Columns.Add("CategoryId", typeof(int));
 
-        for (int i = 0; i < rows; i++)
-        {
-            table.Rows.Add($"Product {i}", i * 10, i);
-        }
+    //     for (int i = 0; i < rows; i++)
+    //     {
+    //         table.Rows.Add($"Product {i}", i * 10, i);
+    //     }
 
-        try
-        {
-            await bulkCopy.WriteToServerAsync(table, ct);
-            await transaction.CommitAsync(ct);
-            Console.WriteLine($"✅ Успешно вставлено {rows} записей");
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync(ct);
-            Console.WriteLine($"❌ Ошибка: {ex.Message}");
-            throw;
-        }
+    //     try
+    //     {
+    //         await bulkCopy.WriteToServerAsync(table, ct);
+    //         await transaction.CommitAsync(ct);
+    //         Console.WriteLine($"✅ Успешно вставлено {rows} записей");
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         await transaction.RollbackAsync(ct);
+    //         Console.WriteLine($"❌ Ошибка: {ex.Message}");
+    //         throw;
+    //     }
 
-        return Created();
-    }
+    //     return Created();
+    // }
 }

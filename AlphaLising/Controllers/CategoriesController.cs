@@ -5,7 +5,6 @@ using Core.Interfaces;
 using Core.Models;
 using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 using Category = Core.Models.Category;
 
 namespace AlphaLising.Controllers;
@@ -55,41 +54,41 @@ public class CategoriesController(
         ;
     }
 
-    [HttpPost("bulkcatergories")]
-    public async Task<IActionResult> CreateBulksAsync(CancellationToken ct, int rows = 50_000)
-    {
-        await using var connection = new SqlConnection(Configuration.GetConnectionString("DefaultConnection"));
-        await connection.OpenAsync(); //  
+    // [HttpPost("bulkcatergories")]
+    // public async Task<IActionResult> CreateBulksAsync(CancellationToken ct, int rows = 50_000)
+    // {
+    //     await using var connection = new SqlConnection(Configuration.GetConnectionString("DefaultConnection"));
+    //     await connection.OpenAsync(); //  
 
-        await using var transaction = connection.BeginTransaction(); // ← Опционально: транзакция
-        using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction);
-        bulkCopy.DestinationTableName = "Categories";
+    //     await using var transaction = connection.BeginTransaction(); // ← Опционально: транзакция
+    //     using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction);
+    //     bulkCopy.DestinationTableName = "Categories";
 
-        // 🔥 Обязательно: добавь маппинг колонок!
-        bulkCopy.ColumnMappings.Add("Name", "Name");
+    //     // 🔥 Обязательно: добавь маппинг колонок!
+    //     bulkCopy.ColumnMappings.Add("Name", "Name");
 
-        var table = new DataTable();
-        table.Columns.Add("Name", typeof(string));
+    //     var table = new DataTable();
+    //     table.Columns.Add("Name", typeof(string));
 
 
-        for (int i = 0; i < rows; i++)
-        {
-            table.Rows.Add($"CategoryName {i}");
-        }
+    //     for (int i = 0; i < rows; i++)
+    //     {
+    //         table.Rows.Add($"CategoryName {i}");
+    //     }
 
-        try
-        {
-            await bulkCopy.WriteToServerAsync(table);
-            await transaction.CommitAsync(); // ← фиксируем
-            Console.WriteLine($"✅ Успешно вставлено {rows} записей");
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            Console.WriteLine($"❌ Ошибка: {ex.Message}");
-            throw;
-        }
+    //     try
+    //     {
+    //         await bulkCopy.WriteToServerAsync(table);
+    //         await transaction.CommitAsync(); // ← фиксируем
+    //         Console.WriteLine($"✅ Успешно вставлено {rows} записей");
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         await transaction.RollbackAsync();
+    //         Console.WriteLine($"❌ Ошибка: {ex.Message}");
+    //         throw;
+    //     }
 
-        return Created();
-    }
+    //     return Created();
+    // }
 }
