@@ -150,7 +150,7 @@ jobs:
               -e ASPNETCORE_ENVIRONMENT=Production \
               -e ASPNETCORE_URLS=http://+:8080 \
               -e ConnectionStrings__Redis=redis:6379 \
-              -e ConnectionStrings__DefaultConnection=${{ secrets.SQL_CONNECTION }} \
+              -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
 
             # Чистим старые образы
