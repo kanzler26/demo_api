@@ -7,7 +7,6 @@ COPY AlphaLising/AlphaLising.csproj ./AlphaLising/
 COPY Core/Core.csproj ./Core/
 COPY Application/Application.csproj ./Application/
 COPY Infrastructure/Infrastructure.csproj ./Infrastructure/
-COPY Orders/Orders.csproj ./Orders/
 
 RUN dotnet restore AlphaLising.sln
 
