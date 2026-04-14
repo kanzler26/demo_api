@@ -105,7 +105,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
+      - name: Apply database migrations
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Запустить временный контейнер с миграциями
+            docker run --rm \
+              --network app-network \
+              -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
+              ghcr.io/kanzler26/demo_api:latest \
+              dotnet ef database update \
+                --project /app/Infrastructure/Infrastructure.csproj \
+                --startup-project /app/AlphaLising/AlphaLising.csproj \
+                --no-build \
+                --verbose || echo "⚠️ Migration warning"
+
+          # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
       - name: Deploy to Beget VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -132,7 +150,7 @@ jobs:
               -e ASPNETCORE_ENVIRONMENT=Production \
               -e ASPNETCORE_URLS=http://+:8080 \
               -e ConnectionStrings__Redis=redis:6379 \
-              -e ConnectionStrings__DefaultConnection=${{ secrets.SQL_CONNECTION }} \
+              -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
 
             # Чистим старые образы
