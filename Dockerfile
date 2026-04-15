@@ -3,8 +3,6 @@ WORKDIR /src
 
 # 1. Копируем только решения и проекты для restore
 COPY *.sln ./
-COPY Directory.Build.props ./
-
 # 2. Копируем .csproj файлы в подпапки (используем массив для надёжности)
 COPY ["AlphaLising/AlphaLising.csproj", "AlphaLising/"]
 COPY ["Core/Core.csproj", "Core/"]
