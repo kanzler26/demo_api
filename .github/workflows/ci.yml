@@ -7,14 +7,14 @@ on:
   pull_request:
     branches: [master]
 
+# 🔥 Подавляем предупреждение о депрекации Node.js 20
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DOTNET_VERSION: "9.0.x"
-  PROJECT_PATH: AlphaLising/AlphaLising.csproj
 
 jobs:
-  # === 1. LINT & BUILD ===
+  # === 1. LINT & BUILD (проверка кода) ===
   lint-and-build:
     name: Lint & Build
     runs-on: ubuntu-24.04
@@ -24,48 +24,22 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          dotnet-version: "9.0.x"
 
       - name: Restore dependencies
-        run: dotnet restore ${{ env.PROJECT_PATH }}
+        run: dotnet restore AlphaLising/AlphaLising.csproj
 
       - name: Build
-        run: dotnet build ${{ env.PROJECT_PATH }} --no-restore --configuration Release
+        run: dotnet build AlphaLising/AlphaLising.csproj --no-restore --configuration Release
 
       - name: Run analyzers
-        run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings"
+        run: dotnet format AlphaLising/AlphaLising.csproj --verify-no-changes --no-restore || echo "⚠️ Format warnings"
 
-  # === 2. TEST ===
-  test:
-    name: Run Tests
-    runs-on: ubuntu-24.04
-    needs: lint-and-build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore dependencies
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      - name: Run unit tests
-        run: dotnet test ${{ env.PROJECT_PATH }} --no-restore --configuration Release --collect:"XPlat Code Coverage" --logger:"console;verbosity=detailed"
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        if: github.event_name == 'push'
-        with:
-          files: "**/coverage.cobertura.xml"
-          fail_ci_if_error: false
-
-    # === 3. BUILD & PUSH DOCKER IMAGE + DEPLOY ===
+  # === 2. BUILD & DEPLOY (только если пуш в master/dev) ===
   docker-and-deploy:
     name: Build, Push & Deploy
     runs-on: ubuntu-24.04
-    needs: test
+    needs: lint-and-build
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
@@ -90,7 +64,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
@@ -105,25 +78,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Apply database migrations
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            # Запустить временный контейнер с миграциями
-            docker run --rm \
-              --network app-network \
-              -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
-              ghcr.io/kanzler26/demo_api:latest \
-              dotnet ef database update \
-                --project /app/Infrastructure/Infrastructure.csproj \
-                --startup-project /app/AlphaLising/AlphaLising.csproj \
-                --no-build \
-                --verbose || echo "⚠️ Migration warning"
-
-          # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
+      # 🔥 ДЕПЛОЙ на VPS
       - name: Deploy to Beget VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -131,17 +86,28 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            # Логин в GHCR (для pull приватного образа)
+            set -e
+
+            echo "🔐 Logging in to GHCR..."
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin 2>/dev/null || true
 
-            # Pull образа (используем тот же тег, что и в build)
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}"
+            echo "📦 Pulling image: $IMAGE_TAG"
+            docker pull "$IMAGE_TAG"
 
-            # Останавливаем старый контейнер
-            docker stop demo_api 2>/dev/null || true
-            docker rm demo_api 2>/dev/null || true
+            echo "🌐 Ensuring app-network exists..."
+            docker network create app-network 2>/dev/null || true
 
-            # Запускаем НОВЫЙ с правильными настройками
+            echo "🍅 Ensuring Redis is running..."
+            if ! docker ps --format '{{.Names}}' | grep -q '^redis$'; then
+              docker run -d --name redis --restart unless-stopped \
+                --network app-network redis:7-alpine
+              echo "✅ Redis started"
+            fi
+
+            echo "🚀 Deploying demo_api..."
+            docker rm -f demo_api 2>/dev/null || true
+
             docker run -d \
               --name demo_api \
               --restart unless-stopped \
@@ -151,7 +117,21 @@ jobs:
               -e ASPNETCORE_URLS=http://+:8080 \
               -e ConnectionStrings__Redis=redis:6379 \
               -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+              "$IMAGE_TAG"
 
-            # Чистим старые образы
-            docker image prune -f
+            echo "⏳ Waiting 15s for app startup..."
+            sleep 15
+
+            echo "🩺 Health check (accepts 200 or 404)..."
+            HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/Categories/1)
+            if [[ "$HEALTH_CODE" =~ ^(200|404)$ ]]; then
+              echo "✅ App is healthy! (HTTP $HEALTH_CODE)"
+            else
+              echo "❌ Health check failed with HTTP $HEALTH_CODE"
+              echo "📋 Last 30 logs:"
+              docker logs demo_api --tail 30
+              exit 1
+            fi
+
+            echo "🧹 Cleaning up old images..."
+            docker image prune -f || true

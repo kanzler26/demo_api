@@ -103,7 +103,7 @@ builder.Services.AddScoped<IProductService<CreateProductRequest, ResponseProduct
 builder.Services.AddMapster();
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
-if (builder.Environment.IsDevelopment()) builder.Services.AddHostedService<DatabaseSeeder>();
+builder.Services.AddHostedService<DatabaseSeeder>();
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
