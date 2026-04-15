@@ -9,7 +9,9 @@ COPY Application/Application.csproj ./Application/
 COPY Infrastructure/Infrastructure.csproj ./Infrastructure/
 
 RUN dotnet restore AlphaLising.sln
-
+# Установите глобальный инструмент для миграций
+RUN dotnet tool install --global dotnet-ef && \
+    ln -s /root/.dotnet/tools/dotnet-ef /usr/local/bin/dotnet-ef
 COPY . .
 
 # Собираем API-проект
