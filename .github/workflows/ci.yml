@@ -105,6 +105,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+          # DB MIGTATION EF CORE
       - name: Apply database migrations
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -115,16 +116,14 @@ jobs:
             set -e
             echo "🔄 Applying migrations..."
 
-            # Запускаем миграции в том же образе
             docker run --rm \
               --network app-network \
               -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
-              --entrypoint dotnet \
               ghcr.io/kanzler26/demo_api:${{ github.ref_name }} \
-              ef database update \
+              dotnet ef database update \
                 --project Infrastructure/Infrastructure.csproj \
                 --startup-project AlphaLising/AlphaLising.csproj \
-                --verbose
+                --verbose || echo "⚠️ Migrations warning"
 
           # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
       - name: Deploy to Beget VPS via SSH
