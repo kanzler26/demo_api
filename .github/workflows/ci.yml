@@ -35,6 +35,31 @@ jobs:
       - name: Run analyzers
         run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings"
 
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 9.0.2
+
+      - name: Add tools to PATH
+        run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: Generate idempotent migration script
+        run: |
+          dotnet ef migrations script \
+            --project Infrastructure/Infrastructure.csproj \
+            --startup-project AlphaLising/AlphaLising.csproj \
+            --context Infrastructure.Context.MyAppContext \
+            --output migrations.sql \
+            --idempotent \
+            --verbose
+        env:
+          # Если ваши модели зависят от подключения к БД (редко, но бывает)
+          ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
+
+      - name: Copy script to VPS
+        run: |
+          scp -o StrictHostKeyChecking=no \
+            migrations.sql \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/migrations.sql
+
   # === 2. TEST ===
   # test:
   # name: Run Tests
@@ -106,6 +131,7 @@ jobs:
           cache-to: type=gha,mode=max
 
           # DB MIGTATION EF CORE
+
       - name: Apply database migrations
         uses: appleboy/ssh-action@v1.0.3
         with:
