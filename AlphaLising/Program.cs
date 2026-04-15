@@ -103,7 +103,7 @@ builder.Services.AddScoped<IProductService<CreateProductRequest, ResponseProduct
 builder.Services.AddMapster();
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
-if (builder.Environment.IsDevelopment()) builder.Services.AddHostedService<DatabaseSeeder>();
+builder.Services.AddHostedService<DatabaseSeeder>();
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
@@ -150,23 +150,6 @@ try
         app.UseHsts();
     }
 
-    using (var scope = app.Services.CreateScope())
-    {
-        var services = scope.ServiceProvider;
-        try
-        {
-            var context = services.GetRequiredService<Infrastructure.Context.MyAppContext>();
-            // Применит все миграции автоматически
-            await context.Database.MigrateAsync();
-            Console.WriteLine("✅ Database migrations applied");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ An error occurred while migrating the database: {ex.Message}");
-            // Не выбрасываем исключение, чтобы не ломать старт приложения, если БД временно недоступна
-            // Но в логе вы увидите ошибку
-        }
-    }
     //переделать все dto на record
     //реализовать самописный перехватчик для ошибок
     //использовать подключенный Polly
