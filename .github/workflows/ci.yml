@@ -61,11 +61,16 @@ jobs:
           # Если ваши модели зависят от подключения к БД (редко, но бывает)
           ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
 
-      - name: Copy script to VPS
-        run: |
-          scp -o StrictHostKeyChecking=no \
-            migrations.sql \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/migrations.sql
+      - name: Copy migration script to VPS
+        uses: appleboy/scp-action@v0.1.7 # ← Специальный экшен для scp с поддержкой secrets
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }} # ← Ключ передаётся правильно
+          source: "migrations.sql" # ← Файл на runner'е
+          target: "/tmp" # ← Куда копировать на VPS
+          strip_components: 1 # ← Убирает лишние пути при копировании
+          rm: true # ← Удалить файл после успешного копирования (опционально)
 
   # === 2. TEST ===
   # test:
