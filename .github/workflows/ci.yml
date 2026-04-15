@@ -66,9 +66,10 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "migrations.sql"
-          target: "/tmp"
-          strip_components: 1
+          source: "${{ github.workspace }}/migrations.sql" # 🔥 Абсолютный путь
+          target: "/tmp" # 🔥 Копирует в /tmp/migrations.sql
+          # strip_components: 1  ← 🔥 УДАЛИТЬ ЭТУ СТРОКУ!
+          overwrite: true # Перезаписать, если файл есть
 
   # === 2. TEST (закомментировано, можно раскомментировать позже) ===
   # test:
@@ -148,33 +149,49 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to:
+            type=gha,mode=max
 
-      # 🔥 3. Генерируем миграции (в ЭТОЙ же джобе!)
+            # 🔥 1. Генерируем миграции
       - name: Generate idempotent migration script
         run: |
           dotnet ef migrations script \
             --project Infrastructure/Infrastructure.csproj \
             --startup-project AlphaLising/AlphaLising.csproj \
             --context Infrastructure.Context.MyAppContext \
-            --output migrations.sql \
+            --output "${{ github.workspace }}/migrations.sql" \
             --idempotent \
             --verbose
         env:
           ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
 
-      # 🔥 4. Копируем скрипт на VPS (теперь файл точно есть на этом же runner'е)
+      # 🔥 2. Отладка: проверяем, что файл создан
+      - name: Debug Verify migrations.sql exists
+        run: |
+          echo "🔍 Checking for migrations.sql..."
+          if [ -f "${{ github.workspace }}/migrations.sql" ]; then
+            echo "✅ File found! Size: $(wc -c < "${{ github.workspace }}/migrations.sql") bytes"
+            echo "📄 First 10 lines:"
+            head -10 "${{ github.workspace }}/migrations.sql"
+          else
+            echo "❌ File NOT found in ${{ github.workspace }}"
+            ls -la "${{ github.workspace }}"
+            exit 1
+          fi
+
+      # 🔥 3. Копируем на VPS (исправленный scp-action)
       - name: Copy migration script to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "migrations.sql"
+          source: "${{ github.workspace }}/migrations.sql"
           target: "/tmp"
-          strip_components: 1
+          overwrite: true
+          # strip_components удалён!
 
-      # 🔥 5. Применяем миграции через psql
+      # 🔥 4. Применяем миграции через psql
       - name: Apply database migrations via psql
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -186,29 +203,26 @@ jobs:
             set -e
             echo "🔄 Applying migrations from SQL script..."
 
-            # Проверить, что файл скопировался
+            # Проверка файла на VPS
             if [ ! -f /tmp/migrations.sql ]; then
               echo "❌ migrations.sql not found on VPS!"
-              ls -la /tmp/ | grep -i migration || echo "⚠️ No migration files in /tmp"
+              echo "📁 Contents of /tmp:"
+              ls -la /tmp/ | grep -i migration || echo "⚠️ No migration files"
               exit 1
             fi
 
-            # Проверить, что файл не пустой
             if [ ! -s /tmp/migrations.sql ]; then
               echo "⚠️ migrations.sql is empty - no migrations to apply"
               exit 0
             fi
 
-            # Убедиться, что сеть существует
             docker network create app-network 2>/dev/null || true
 
-            # Убедиться, что PostgreSQL запущен
             if ! docker ps --format '{{.Names}}' | grep -q '^postgres$'; then
               echo "❌ PostgreSQL is not running!"
               exit 1
             fi
 
-            # Применить скрипт к БД через psql
             echo "📦 Applying SQL to database..."
             docker exec -i postgres psql -U sa -d alphalising < /tmp/migrations.sql
 
