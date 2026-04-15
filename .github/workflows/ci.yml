@@ -35,7 +35,7 @@ jobs:
       - name: Run analyzers
         run: dotnet format ${{ env.PROJECT_PATH }} --verify-no-changes --no-restore || echo "⚠️ Format warnings"
 
-      - name: Debug: Check tools availability
+      - name: Debug Check tools availability
         run: |
           echo "🔍 dotnet version: $(dotnet --version)"
           echo "🔍 dotnet-ef version: $(dotnet ef --version || echo 'NOT FOUND')"
