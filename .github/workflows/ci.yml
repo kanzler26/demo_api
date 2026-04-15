@@ -93,16 +93,30 @@ jobs:
   #         fail_ci_if_error: false
 
   # === 3. BUILD & PUSH DOCKER IMAGE + DEPLOY ===
+  # === 3. BUILD & PUSH DOCKER IMAGE + DEPLOY + MIGRATIONS ===
   docker-and-deploy:
     name: Build, Push & Deploy
     runs-on: ubuntu-24.04
-    # needs: test
+    # needs: test  # Раскомментируйте, если включите тесты
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      # 🔥 1. Setup .NET SDK (нужен для генерации миграций)
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # 🔥 2. Установить dotnet-ef для генерации скрипта
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 9.0.2
+
+      - name: Add tools to PATH
+        run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -135,11 +149,32 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # 🔥 Временно отключаем кэш, если были ошибки "cannot replace directory with file"
-          # cache-from: []
-          # cache-to: ""
 
-      # 🔥 НОВЫЙ ШАГ: Применение миграций через psql + SQL-скрипт
+      # 🔥 3. Генерируем миграции (в ЭТОЙ же джобе!)
+      - name: Generate idempotent migration script
+        run: |
+          dotnet ef migrations script \
+            --project Infrastructure/Infrastructure.csproj \
+            --startup-project AlphaLising/AlphaLising.csproj \
+            --context Infrastructure.Context.MyAppContext \
+            --output migrations.sql \
+            --idempotent \
+            --verbose
+        env:
+          ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
+
+      # 🔥 4. Копируем скрипт на VPS (теперь файл точно есть на этом же runner'е)
+      - name: Copy migration script to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "migrations.sql"
+          target: "/tmp"
+          strip_components: 1
+
+      # 🔥 5. Применяем миграции через psql
       - name: Apply database migrations via psql
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -154,7 +189,14 @@ jobs:
             # Проверить, что файл скопировался
             if [ ! -f /tmp/migrations.sql ]; then
               echo "❌ migrations.sql not found on VPS!"
+              ls -la /tmp/ | grep -i migration || echo "⚠️ No migration files in /tmp"
               exit 1
+            fi
+
+            # Проверить, что файл не пустой
+            if [ ! -s /tmp/migrations.sql ]; then
+              echo "⚠️ migrations.sql is empty - no migrations to apply"
+              exit 0
             fi
 
             # Убедиться, что сеть существует
@@ -167,15 +209,13 @@ jobs:
             fi
 
             # Применить скрипт к БД через psql
-            # -i передаёт скрипт из stdin в контейнер
+            echo "📦 Applying SQL to database..."
             docker exec -i postgres psql -U sa -d alphalising < /tmp/migrations.sql
 
             echo "✅ Migrations applied successfully"
-
-            # (Опционально) Удалить скрипт после применения
             rm -f /tmp/migrations.sql || true
 
-      # 🔥 ДЕПЛОЙ приложения
+      # 🔥 6. ДЕПЛОЙ приложения
       - name: Deploy to Beget VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -203,7 +243,6 @@ jobs:
             fi
 
             echo "🚀 Deploying demo_api..."
-            # 🔥 КЛЮЧЕВОЕ: -f удаляет контейнер, даже если он "завис"
             docker rm -f demo_api 2>/dev/null || true
 
             docker run -d \
@@ -235,5 +274,4 @@ jobs:
             docker logs demo_api --tail 30
             exit 1
 
-            # Чистим старые образы (не критично, поэтому без set -e)
             docker image prune -f || true
