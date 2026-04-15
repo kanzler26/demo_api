@@ -153,81 +153,81 @@ jobs:
             type=gha,mode=max
 
             # 🔥 1. Генерируем миграции
-      - name: Generate idempotent migration script
-        run: |
-          dotnet ef migrations script \
-            --project Infrastructure/Infrastructure.csproj \
-            --startup-project AlphaLising/AlphaLising.csproj \
-            --context Infrastructure.Context.MyAppContext \
-            --output "${{ github.workspace }}/migrations.sql" \
-            --idempotent \
-            --verbose
-        env:
-          ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
+      # - name: Generate idempotent migration script
+      #   run: |
+      #     dotnet ef migrations script \
+      #       --project Infrastructure/Infrastructure.csproj \
+      #       --startup-project AlphaLising/AlphaLising.csproj \
+      #       --context Infrastructure.Context.MyAppContext \
+      #       --output "${{ github.workspace }}/migrations.sql" \
+      #       --idempotent \
+      #       --verbose
+      #   env:
+      #     ConnectionStrings__DefaultConnection: ${{ secrets.SQL_CONNECTION }}
 
-      # 🔥 2. Отладка: проверяем, что файл создан
-      - name: Debug Verify migrations.sql exists
-        run: |
-          echo "🔍 Checking for migrations.sql..."
-          if [ -f "${{ github.workspace }}/migrations.sql" ]; then
-            echo "✅ File found! Size: $(wc -c < "${{ github.workspace }}/migrations.sql") bytes"
-            echo "📄 First 10 lines:"
-            head -10 "${{ github.workspace }}/migrations.sql"
-          else
-            echo "❌ File NOT found in ${{ github.workspace }}"
-            ls -la "${{ github.workspace }}"
-            exit 1
-          fi
+      # # 🔥 2. Отладка: проверяем, что файл создан
+      # - name: Debug Verify migrations.sql exists
+      #   run: |
+      #     echo "🔍 Checking for migrations.sql..."
+      #     if [ -f "${{ github.workspace }}/migrations.sql" ]; then
+      #       echo "✅ File found! Size: $(wc -c < "${{ github.workspace }}/migrations.sql") bytes"
+      #       echo "📄 First 10 lines:"
+      #       head -10 "${{ github.workspace }}/migrations.sql"
+      #     else
+      #       echo "❌ File NOT found in ${{ github.workspace }}"
+      #       ls -la "${{ github.workspace }}"
+      #       exit 1
+      #     fi
 
-      # 🔥 3. Копируем на VPS (исправленный scp-action)
-      - name: Copy migration script to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "${{ github.workspace }}/migrations.sql"
-          target: "/tmp"
-          overwrite: true
-          # strip_components удалён!
+      # # 🔥 3. Копируем на VPS (исправленный scp-action)
+      # - name: Copy migration script to VPS
+      #   uses: appleboy/scp-action@v0.1.7
+      #   with:
+      #     host: ${{ secrets.VPS_HOST }}
+      #     username: ${{ secrets.VPS_USER }}
+      #     key: ${{ secrets.VPS_SSH_KEY }}
+      #     source: "${{ github.workspace }}/migrations.sql"
+      #     target: "/tmp"
+      #     overwrite: true
+      #     # strip_components удалён!
 
-      # 🔥 4. Применяем миграции через psql
-      - name: Apply database migrations via psql
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 5m
-          script: |
-            set -e
-            echo "🔄 Applying migrations from SQL script..."
+      # # 🔥 4. Применяем миграции через psql
+      # - name: Apply database migrations via psql
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   with:
+      #     host: ${{ secrets.VPS_HOST }}
+      #     username: ${{ secrets.VPS_USER }}
+      #     key: ${{ secrets.VPS_SSH_KEY }}
+      #     command_timeout: 5m
+      #     script: |
+      #       set -e
+      #       echo "🔄 Applying migrations from SQL script..."
 
-            # Проверка файла на VPS
-            if [ ! -f /tmp/migrations.sql ]; then
-              echo "❌ migrations.sql not found on VPS!"
-              echo "📁 Contents of /tmp:"
-              ls -la /tmp/ | grep -i migration || echo "⚠️ No migration files"
-              exit 1
-            fi
+      #       # Проверка файла на VPS
+      #       if [ ! -f /tmp/migrations.sql ]; then
+      #         echo "❌ migrations.sql not found on VPS!"
+      #         echo "📁 Contents of /tmp:"
+      #         ls -la /tmp/ | grep -i migration || echo "⚠️ No migration files"
+      #         exit 1
+      #       fi
 
-            if [ ! -s /tmp/migrations.sql ]; then
-              echo "⚠️ migrations.sql is empty - no migrations to apply"
-              exit 0
-            fi
+      #       if [ ! -s /tmp/migrations.sql ]; then
+      #         echo "⚠️ migrations.sql is empty - no migrations to apply"
+      #         exit 0
+      #       fi
 
-            docker network create app-network 2>/dev/null || true
+      #       docker network create app-network 2>/dev/null || true
 
-            if ! docker ps --format '{{.Names}}' | grep -q '^postgres$'; then
-              echo "❌ PostgreSQL is not running!"
-              exit 1
-            fi
+      #       if ! docker ps --format '{{.Names}}' | grep -q '^postgres$'; then
+      #         echo "❌ PostgreSQL is not running!"
+      #         exit 1
+      #       fi
 
-            echo "📦 Applying SQL to database..."
-            docker exec -i postgres psql -U sa -d alphalising < /tmp/migrations.sql
+      #       echo "📦 Applying SQL to database..."
+      #       docker exec -i postgres psql -U sa -d alphalising < /tmp/migrations.sql
 
-            echo "✅ Migrations applied successfully"
-            rm -f /tmp/migrations.sql || true
+      #       echo "✅ Migrations applied successfully"
+      #       rm -f /tmp/migrations.sql || true
 
       # 🔥 6. ДЕПЛОЙ приложения
       - name: Deploy to Beget VPS via SSH
