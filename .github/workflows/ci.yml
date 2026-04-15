@@ -113,9 +113,20 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            set -e
-            echo "🔄 Applying migrations..."
+            set -e  # Остановить скрипт при первой ошибке
 
+            echo "🔄 Checking prerequisites..."
+
+            # Убедиться, что сеть существует
+            docker network create app-network 2>/dev/null || true
+
+            # Убедиться, что PostgreSQL запущен
+            if ! docker ps --format '{{.Names}}' | grep -q '^postgres$'; then
+              echo "❌ PostgreSQL is not running!"
+              exit 1
+            fi
+
+            echo "🔄 Applying migrations..."
             docker run --rm \
               --network app-network \
               -e ConnectionStrings__DefaultConnection="${{ secrets.SQL_CONNECTION }}" \
@@ -123,7 +134,9 @@ jobs:
               dotnet ef database update \
                 --project Infrastructure/Infrastructure.csproj \
                 --startup-project AlphaLising/AlphaLising.csproj \
-                --verbose || echo "⚠️ Migrations warning"
+                --verbose
+
+            echo "✅ Migrations applied successfully"
 
           # 🔥 ДЕПЛОЙ — теперь внутри той же джобы, с правильными переменными
       - name: Deploy to Beget VPS via SSH

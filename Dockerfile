@@ -20,11 +20,12 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 
-# 🔥 Копируем dotnet-ef из build-этапа в runtime
+# 🔥 Копируем не только publish, но и проекты/миграции для EF CLI
+COPY --from=build /src/Infrastructure ./Infrastructure/
+COPY --from=build /src/AlphaLising ./AlphaLising/
 COPY --from=build /root/.dotnet/tools /root/.dotnet/tools
 ENV PATH="$PATH:/root/.dotnet/tools"
 
 COPY --from=build /app/publish .
 EXPOSE 8080
-
 ENTRYPOINT ["dotnet", "AlphaLising.dll"]
