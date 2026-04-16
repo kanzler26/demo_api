@@ -1,27 +1,44 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:15.8-alpine
     environment:
       POSTGRES_USER: sa
       POSTGRES_PASSWORD: MyPassw0rd!2024
       POSTGRES_DB: alphalising
-    ports: ["5432:5432"]
-    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # 🔥 Healthcheck: проверяет, что БД реально принимает подключения
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sa -d alphalising"]
+      interval: 3s
+      timeout: 2s
+      retries: 10  # Даём 30 секунд на инициализацию
+      start_period: 5s  # Не проверять первые 5 секунд (даём время на старт)
 
   redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
+    image: redis:7.4.1-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
 
   demo_api:
     build: .
-    ports: ["8080:8080"]
+    ports:
+      - "8080:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=alphalising;Username=sa;Password=MyPassw0rd!2024
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=kanzpetpos;Username=mczavupa;Password=DFsdf12%f@tt2FD@!%df;Trust Server Certificate=true
       - ConnectionStrings__Redis=redis:6379
-    depends_on: [postgres, redis]
-
+    # 🔥 Ждём, пока БД и Redis пройдут healthcheck
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 🔥 (Опционально) Рестарт при падении — для разработки
+    restart: unless-stopped
+    
 volumes:
-  postgres-data:
+  postgres-data:  # ← Объявляем именованный том
