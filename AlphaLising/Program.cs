@@ -12,7 +12,6 @@ using Infrastructure.Repositories;
 using Infrastructure.Seeding;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Polly;
 using Polly.CircuitBreaker;
@@ -22,8 +21,6 @@ using Serilog.Events;
 using StackExchange.Redis;
 using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
-using Npgsql;
-using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOptions();

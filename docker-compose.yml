@@ -1,77 +1,44 @@
-version: '3.8'
-
 services:
-  db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: demo_api-db
+  postgres:
+    image: postgres:15.8-alpine
     environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=${DB_SA_PASSWORD}
-      - MSSQL_PID=Express
-    ports:
-      - "${DB_PORT:-1433}:1433"
+      POSTGRES_USER: sa
+      POSTGRES_PASSWORD: MyPassw0rd!2024
+      POSTGRES_DB: alphalising
     volumes:
-      - mssql_data:/var/opt/mssql/data
+      - postgres-data:/var/lib/postgresql/data
+    # 🔥 Healthcheck: проверяет, что БД реально принимает подключения
     healthcheck:
-      test: [ "CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "${HEALTHCHECK_DB_PASSWORD}", "-C", "-Q", "SELECT 1" ]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    networks:
-      - default
+      test: ["CMD-SHELL", "pg_isready -U sa -d alphalising"]
+      interval: 3s
+      timeout: 2s
+      retries: 10  # Даём 30 секунд на инициализацию
+      start_period: 5s  # Не проверять первые 5 секунд (даём время на старт)
 
   redis:
-    image: redis:8.6.2-alpine
-    container_name: demo_api-redis
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+    image: redis:7.4.1-alpine
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
       retries: 5
-    networks:
-      - default
 
-  webapi:
+  demo_api:
     build: .
-    container_name: demo_api-web
     ports:
-      - "${API_PORT:-8080}:8080"
-    develop:
-      watch:
-        - path: ./src
-          action: rebuild
-          target: /src
-        - path: ./appsettings*.json
-          action: sync+restart
-          target: /app
+      - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
-      - ConnectionStrings__DefaultConnection=${CONNECTION_STRING_DEFAULT}
-      - ConnectionStrings__Redis=${CONNECTION_STRING_REDIS}
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=kanzpetpos;Username=mczavupa;Password=DFsdf12%f@tt2FD@!%df;Trust Server Certificate=true
+      - ConnectionStrings__Redis=redis:6379
+    # 🔥 Ждём, пока БД и Redis пройдут healthcheck
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:8080/health || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 90s
-    networks:
-      - default
-
+    # 🔥 (Опционально) Рестарт при падении — для разработки
+    restart: unless-stopped
+    
 volumes:
-  mssql_data:
-  redis_data:
-
-networks:
-  default:
-    driver: bridge
+  postgres-data:  # ← Объявляем именованный том
