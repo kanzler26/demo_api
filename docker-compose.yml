@@ -23,10 +23,16 @@ services:
       timeout: 2s
       retries: 5
 
-  demo_api:
-    build: .
+  apigateway:
+    build: ./ApiGateway
+    image: yarp-gateway
     ports:
-      - "8080:8080"
+      - "80:8080"
+    depends_on: [demo_api]
+    networks: [default]
+
+  demo_api:
+    build: .    
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Host=postgres;Database=kanzpetpos;Username=mczavupa;Password=DFsdf12%f@tt2FD@!%df;Trust Server Certificate=true

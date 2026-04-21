@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using AlphaLising.Extensions;
 using Application.Mappings;
 using Application.Service;
@@ -23,6 +24,9 @@ using AppContext = Infrastructure.Context.MyAppContext;
 using Category = Core.Models.Category;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddReverseProxy()
+.LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+// builder.Services.AddReverseProxy().LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 builder.Services.AddOptions();
 builder.Services.AddMemoryCache();
 builder.Services.Configure<IpRateLimitOptions>(options =>
@@ -158,7 +162,7 @@ try
     app.UseAuthorization();
     app.UseRouting();
     app.UseIpRateLimiting();
-
+    app.MapReverseProxy();
     app.MapControllers();
     // В пайплайне, после app.UseRouting():
     app.Use(async (context, next) =>
